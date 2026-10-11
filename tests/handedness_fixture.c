@@ -1,3 +1,5 @@
+static _Bool keyboard_modal_test;
+_Bool qkeyboard_modal(void){return keyboard_modal_test;}
 /* Exercise the real host input path against a deterministic OpenXR runtime.
  * Render/startup entry points are excluded; no headset is required. */
 #include <assert.h>
@@ -224,6 +226,13 @@ int main(void){
     unlink("eye-0.ppm");unlink("eye-1.ppm");frame_probe.enabled=false;
     paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
     assert(qlobby_visible());stick_x=0;tick();
+    qlobby_input(QL_DOWN);qlobby_input(QL_DOWN);qlobby_input(QL_ACCEPT);assert(qlobby_editing());
+    qlobby_replace_text("192.168.1.42");
+    keyboard_modal_test=true;buttons[id(lower_action)][RIGHT_HAND]=true;triggers[RIGHT_HAND]=1;tick();
+    assert(qlobby_editing()&&tc2_link_session()->state==TC2_OFF);
+    keyboard_modal_test=false;tick();tick();assert(qlobby_editing()&&tc2_link_session()->state==TC2_OFF);
+    buttons[id(lower_action)][RIGHT_HAND]=false;triggers[RIGHT_HAND]=0;tick();
+    click(upper_action,RIGHT_HAND);assert(qlobby_visible()&&!qlobby_editing());
     click(upper_action,RIGHT_HAND);qlobby_tick(0);assert(!qlobby_visible());
     puts("PASS: production Frame OpenXR action path; both profile bindings and Touch fallback, trigger/grip behavior, Menu/options mappings, View tap/hold timing, recenter/calibration and haptics; bounded tick-delayed paired capture; runtime-owned refresh policy");
     return 0;
@@ -367,6 +376,13 @@ int main(void){
     replay_input=false;ss22_input_neutral();assert(arcade_bits==0);
     paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
     assert(qlobby_visible());stick_x=0;tick();
+    qlobby_input(QL_DOWN);qlobby_input(QL_DOWN);qlobby_input(QL_ACCEPT);assert(qlobby_editing());
+    qlobby_replace_text("192.168.1.42");
+    keyboard_modal_test=true;buttons[id(lower_action)][RIGHT_HAND]=true;triggers[RIGHT_HAND]=1;tick();
+    assert(qlobby_editing()&&tc2_link_session()->state==TC2_OFF);
+    keyboard_modal_test=false;tick();tick();assert(qlobby_editing()&&tc2_link_session()->state==TC2_OFF);
+    buttons[id(lower_action)][RIGHT_HAND]=false;triggers[RIGHT_HAND]=0;tick();
+    click(upper_action,RIGHT_HAND);assert(qlobby_visible()&&!qlobby_editing());
     click(upper_action,RIGHT_HAND);qlobby_tick(0);assert(!qlobby_visible());
     puts("PASS: TC2 four-credit sequence and gun ADC bounds; real host controls, gun pitch persistence/bounds/repeat/reset, model/muzzle/aim alignment in both hands, local-space correction, focus/action loss and existing input regressions");
     return 0;

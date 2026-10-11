@@ -11,6 +11,10 @@ affiliated with or endorsed by Namco, Bandai Namco, or Meta.
   the submodule and APK's `assets/licenses/namco22-LICENSE.txt`.
 - **SDL 2.30.11:** zlib license; original notice included in the APK.
 - **Khronos OpenXR loader 1.1.43:** its original license notice is included in the APK.
+- **Valve OpenVR keyboard ABI header:** BSD-3-Clause, Copyright (c) 2015 Valve Corporation;
+  v2.5.1 commit `ae46a8dd0172580648c8922658a100439115d3eb`. Unmodified header and
+  license are in `quest/vendor/openvr`; the license accompanies APK/Windows packages.
+  No OpenVR runtime binary is bundled.
 - **Windows OpenGL loader:** generated with [glad 2.0.8](https://github.com/Dav1dde/glad);
   generated code and Khronos declarations retain their notices in `pc/vendor/glad`.
 - **Windows dependencies:** zlib 1.3.1, SDL 2.30.11, Khronos OpenXR 1.1.43,

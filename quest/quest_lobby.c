@@ -6,7 +6,7 @@
 static bool visible;
 static enum { HOME,IP,FIND,SESSION } page;
 static int focus,resume,last_action;
-static unsigned revision;
+static unsigned revision,keyboard_request;
 static TC2SessionState previous;
 static char ip[16],note[80];
 static void changed(void){revision++;}
@@ -20,6 +20,10 @@ bool qlobby_editing(void){return visible&&page==IP;}
 void qlobby_keyboard_result(bool requested){
     if(qlobby_editing()){snprintf(note,sizeof note,"%s",requested?"TYPE OR PASTE THE HOST IP":"STEAMVR KEYBOARD NOT CONNECTED");changed();}
 }
+unsigned qlobby_keyboard_request(void){return keyboard_request;}
+const char *qlobby_text_value(void){return ip;}
+void qlobby_keyboard_error(const char *message){if(qlobby_editing()){snprintf(note,sizeof note,"%s",message);changed();}}
+void qlobby_replace_text(const char *text){if(qlobby_editing()){ip[0]=0;qlobby_text(text);}}
 void qlobby_text(const char *text){
     if(!qlobby_editing())return;
     size_t n=strlen(ip),add=strlen(text);
@@ -53,7 +57,7 @@ void qlobby_input(QLobbyKey key){
     if(key==QL_BACK){back();return;}
     const TC2Session *s=tc2_link_session();
     if(page==IP){
-        if(key==QL_ACCEPT && parse_ip()){tc2_link_join(ip);page=SESSION;focus=0;}
+        if(key==QL_ACCEPT){if(parse_ip()){tc2_link_join(ip);page=SESSION;focus=0;}else keyboard_request++;}
         return;
     }
     int count=page==HOME?4:page==FIND?(int)s->found_count+1:3;
@@ -63,7 +67,7 @@ void qlobby_input(QLobbyKey key){
     if(page==HOME){
         if(focus==0){last_action=0;tc2_link_host();page=SESSION;focus=0;}
         else if(focus==1){last_action=1;tc2_link_find();page=FIND;focus=0;}
-        else if(focus==2){last_action=2;page=IP;note[0]=0;}
+        else if(focus==2){last_action=2;page=IP;note[0]=0;keyboard_request++;}
         else back();
     } else if(page==FIND){
         if(focus<(int)s->found_count){last_action=2;snprintf(ip,sizeof ip,"%s",s->found[focus]);tc2_link_join(ip);page=SESSION;focus=0;}

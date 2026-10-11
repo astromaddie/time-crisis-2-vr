@@ -585,6 +585,9 @@ static void lobby_service(void){
 }
 #endif
 static void sync_input(XrTime time,bool head_tracked,float head_y){
+    static bool keyboard_was_modal;
+    if(qkeyboard_modal()){keyboard_was_modal=true;reset_input_edges();lobby_nav_armed=lobby_fire_armed=false;ss22_input_neutral();return;}
+    if(keyboard_was_modal){keyboard_was_modal=false;reset_input_edges();lobby_accept=lobby_back=lobby_view=(ButtonEdge){0};lobby_nav_armed=lobby_fire_armed=false;ss22_input_neutral();return;}
     trigger=pedal=0;aim_valid=gun_tracked=false;
     if(!focused){reset_input_edges();lobby_nav_armed=lobby_fire_armed=false;return;}
     XrActiveActionSet aset={action_set,XR_NULL_PATH};XrActionsSyncInfo sync={XR_TYPE_ACTIONS_SYNC_INFO};sync.countActiveActionSets=1;sync.activeActionSets=&aset;
@@ -1080,6 +1083,7 @@ bool ss22_host_open_headless(void){return false;}
 bool ss22_host_pointer(float *x,float *y,bool *inside){*x=nx;*y=ny;*inside=aim_valid;return active;}
 void ss22_host_shot(const char *p){(void)p;}
 void ss22_host_close(void){
+    qkeyboard_shutdown();
     tc2_link_leave();
     active=false;
 #ifdef TCVR_STEAM_FRAME

@@ -279,6 +279,7 @@ def package(assets, sdk, java, tools):
     license_sources = [
         (ROOT / "LICENSE", "TimeCrisis2VR-LICENSE.txt"),
         (ROOT / "NOTICE.md", "NOTICE.md"),
+        (ROOT / "quest" / "vendor" / "openvr" / "LICENSE", "OpenVR-LICENSE.txt"),
         (ROOT / "upstream" / "LICENSE", "namco22-LICENSE.txt"),
         (sdl / "LICENSE.txt", "SDL2-LICENSE.txt"),
         (xr_root / "META-INF" / "LICENSE", "OpenXR-LICENSE.txt"),

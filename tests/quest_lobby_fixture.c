@@ -65,4 +65,5 @@ int main(int argc,char **argv){
 #ifdef TCVR_PC
     puts("PASS: desktop Ctrl+V/Cmd+V clipboard key events and buffer release");
 #endif
+    return 0;
 }
