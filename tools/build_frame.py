@@ -22,6 +22,7 @@ PACKAGE = "org.timecrisis2.frame"
 APP_NAME = "TimeCrisis2VR"
 SDL_SHA256 = "8b8d4aef2038533da814965220f88f77d60dfa0f32685f80ead65e501337da7f"
 OPENXR_SHA256 = "7e1b36141f9a4f1fa4a7e061936344fd9fcd36bce6c47eae2ad09812736167b6"
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 
 def run(command, cwd=ROOT, env=None):
@@ -220,6 +221,73 @@ def manifest_22(path):
     return rows
 
 
+def write_frame_manifest(source, destination):
+    ET.register_namespace("android", ANDROID_NS)
+    tree = ET.parse(source)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(destination, encoding="utf-8", xml_declaration=True)
+    return tree
+
+
+def manifest_activity_name(activity, package):
+    name = activity.get("{" + ANDROID_NS + "}name")
+    if not name:
+        raise RuntimeError("Frame source manifest contains an activity without android:name")
+    if name.startswith("."):
+        return package + name
+    if "." not in name:
+        return package + "." + name
+    return name
+
+
+def validate_frame_apk_manifest(apk, aapt2, source_manifest):
+    source_root = ET.parse(source_manifest).getroot()
+    package = source_root.get("package")
+    android_attr = lambda element, name: element.get("{" + ANDROID_NS + "}" + name)
+    version_code = android_attr(source_root, "versionCode")
+    version_name = android_attr(source_root, "versionName")
+    uses_sdk = source_root.find("uses-sdk")
+    application = source_root.find("application")
+    if not package or not version_code or not version_name or uses_sdk is None or application is None:
+        raise RuntimeError("Frame source manifest is missing package, version, SDK, or application metadata")
+    min_sdk = android_attr(uses_sdk, "minSdkVersion")
+    target_sdk = android_attr(uses_sdk, "targetSdkVersion")
+    if not min_sdk or not target_sdk:
+        raise RuntimeError("Frame source manifest is missing minimum or target SDK metadata")
+
+    def capture(command):
+        print("> " + " ".join(map(str, command)), flush=True)
+        result = subprocess.run([str(part) for part in command], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+        return result.stdout
+
+    xmltree = capture([aapt2, "dump", "xmltree", apk, "--file", "AndroidManifest.xml"])
+    if "N: android=" + ANDROID_NS not in xmltree:
+        raise RuntimeError("Compiled Frame APK manifest lost the canonical android namespace prefix")
+    for activity in application.findall("activity"):
+        name = manifest_activity_name(activity, package)
+        if '"' + name + '"' not in xmltree:
+            raise RuntimeError("Compiled Frame APK is missing manifest activity " + name)
+
+    badging = capture([aapt2, "dump", "badging", apk])
+    launchable = None
+    for activity in application.findall("activity"):
+        for intent_filter in activity.findall("intent-filter"):
+            actions = {node.get("{" + ANDROID_NS + "}name") for node in intent_filter.findall("action")}
+            categories = {node.get("{" + ANDROID_NS + "}name") for node in intent_filter.findall("category")}
+            if "android.intent.action.MAIN" in actions and "android.intent.category.LAUNCHER" in categories:
+                launchable = manifest_activity_name(activity, package)
+    expected = [
+        f"package: name='{package}' versionCode='{version_code}' versionName='{version_name}'",
+        f"minSdkVersion:'{min_sdk}'", f"targetSdkVersion:'{target_sdk}'",
+    ]
+    if launchable:
+        expected.append(f"launchable-activity: name='{launchable}'")
+    if not all(any(line.startswith(prefix) for line in badging.splitlines()) for prefix in expected):
+        raise RuntimeError("Compiled Frame APK package, version, SDK, or launcher metadata changed")
+    if not launchable and any(line.startswith("launchable-activity:") for line in badging.splitlines()):
+        raise RuntimeError("Compiled Frame APK unexpectedly declares a launcher activity")
+
+
 def package(assets, sdk, java, tools):
     build_tools = sdk / "build-tools" / "35.0.0"
     android_jar = sdk / "platforms" / "android-34" / "android.jar"
@@ -265,12 +333,12 @@ def package(assets, sdk, java, tools):
     apk_base = BUILD / "unaligned.apk"
     public_manifest = BUILD / "roms.sha256"
     public_manifest.write_text("".join(digest + "  " + name + "\n" for digest, name in rows), encoding="ascii")
+    manifest_source = ROOT / "quest" / "AndroidManifest-SteamFrame.xml"
     manifest_out = BUILD / "AndroidManifest-SteamFrame.xml"
-    manifest_tree = ET.parse(ROOT / "quest" / "AndroidManifest-SteamFrame.xml")
+    manifest_tree = write_frame_manifest(manifest_source, manifest_out)
     manifest_package = manifest_tree.getroot().get("package")
     if manifest_package != PACKAGE:
         raise RuntimeError("Frame manifest package ID changed unexpectedly: " + str(manifest_package))
-    manifest_tree.write(manifest_out, encoding="utf-8", xml_declaration=True)
 
     licenses = BUILD / "public-assets" / "licenses"
     public = BUILD / "public-assets"
@@ -325,6 +393,7 @@ def package(assets, sdk, java, tools):
     run(signer + ["sign", "--ks", key, "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android", "--key-pass", "pass:android", "--v1-signing-enabled", "false", "--v2-signing-enabled", "true", "--v3-signing-enabled", "false", OUTPUT])
     run(signer + ["verify", "--verbose", OUTPUT])
     run([build_tools / "zipalign", "-c", "-P", "16", "4", OUTPUT])
+    validate_frame_apk_manifest(OUTPUT, build_tools / "aapt2", manifest_source)
 
     submodule = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT / "upstream", text=True).strip()
     root_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
