@@ -321,7 +321,7 @@ def package(assets, sdk, java, tools):
     if not key.exists():
         run([java / "bin" / "keytool", "-genkeypair", "-keystore", key, "-storepass", "android", "-alias", "androiddebugkey", "-keypass", "android", "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000", "-dname", "CN=Time Crisis II VR Frame,O=Android,C=US"])
     signer = [java / "bin" / "java", "-jar", build_tools / "lib" / "apksigner.jar"]
-    run(signer + ["sign", "--ks", key, "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android", "--key-pass", "pass:android", OUTPUT])
+    run(signer + ["sign", "--ks", key, "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android", "--key-pass", "pass:android", "--v1-signing-enabled", "false", "--v2-signing-enabled", "true", "--v3-signing-enabled", "false", OUTPUT])
     run(signer + ["verify", "--verbose", OUTPUT])
     run([build_tools / "zipalign", "-c", "-P", "16", "4", OUTPUT])
 
