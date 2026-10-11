@@ -11,7 +11,7 @@ static XrActionSuggestedBinding frame_suggested[20],touch_suggested[20];
 static unsigned frame_binding_count,touch_binding_count;
 static XrActionType types[16];
 static bool dual[16],buttons[16][3],connected[2]={true,true},tracked[2]={true,true};
-static float stick_y;
+static float stick_y,stick_x;
 static bool stick_active=true;
 static Q4 controller_rotation={0,0,0,1};
 static float triggers[2],grips[2];
@@ -96,7 +96,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetActionStatePose(XrSession s,const XrActionSt
 XRAPI_ATTR XrResult XRAPI_CALL xrGetActionStateVector2f(XrSession s,const XrActionStateGetInfo *get,XrActionStateVector2f *out){
     (void)s;assert(get->action==pitch_action&&get->subactionPath==XR_NULL_PATH);
     assert(types[id(get->action)]==XR_ACTION_TYPE_VECTOR2F_INPUT);
-    out->isActive=stick_active&&connected[RIGHT_HAND];out->currentState=(XrVector2f){0,stick_y};return XR_SUCCESS;
+    out->isActive=stick_active&&connected[RIGHT_HAND];out->currentState=(XrVector2f){stick_x,stick_y};return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrLocateSpace(XrSpace space,XrSpace base,XrTime t,XrSpaceLocation *out){
     (void)base;(void)t;int h=(int)(uintptr_t)space-1;assert(h==0||h==1);
@@ -222,6 +222,9 @@ int main(void){
     assert(capture_eye(1,2,2)&&access("capture.request",F_OK)!=0&&!frame_probe.capture_once);
     assert(access("eye-0.ppm",F_OK)==0&&access("eye-1.ppm",F_OK)==0);
     unlink("eye-0.ppm");unlink("eye-1.ppm");frame_probe.enabled=false;
+    paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
+    assert(qlobby_visible());stick_x=0;tick();
+    click(upper_action,RIGHT_HAND);qlobby_tick(0);assert(!qlobby_visible());
     puts("PASS: production Frame OpenXR action path; both profile bindings and Touch fallback, trigger/grip behavior, Menu/options mappings, View tap/hold timing, recenter/calibration and haptics; bounded tick-delayed paired capture; runtime-owned refresh policy");
     return 0;
 }
@@ -362,6 +365,9 @@ int main(void){
     replay_input=true;arcade_bits=0x30;g_ss22_gun_x=456;g_ss22_gun_y=123;g_ss22_gun_off=false;
     for(int n=0;n<120;n++){ss22_input_update();ss22_input_neutral();assert(arcade_bits==0x30&&g_ss22_gun_x==456&&g_ss22_gun_y==123&&!g_ss22_gun_off);}
     replay_input=false;ss22_input_neutral();assert(arcade_bits==0);
+    paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
+    assert(qlobby_visible());stick_x=0;tick();
+    click(upper_action,RIGHT_HAND);qlobby_tick(0);assert(!qlobby_visible());
     puts("PASS: TC2 four-credit sequence and gun ADC bounds; real host controls, gun pitch persistence/bounds/repeat/reset, model/muzzle/aim alignment in both hands, local-space correction, focus/action loss and existing input regressions");
     return 0;
 }

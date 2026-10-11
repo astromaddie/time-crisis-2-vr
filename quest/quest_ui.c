@@ -5,7 +5,10 @@
 #include <stdio.h>
 #include <string.h>
 #include "quest_ui.h"
-#include "font_data.h"
+#include "quest_panel.h"
+#include "quest_lobby.h"
+static unsigned last_lobby_revision;
+static bool last_lobby;
 
 enum { WIDTH=640,HEIGHT=480 };
 static GLuint program,vao,vbo,texture;
@@ -14,19 +17,7 @@ static int last_state=-1;
 static int last_pitch;
 static uint8_t pixels[WIDTH*HEIGHT*4];
 
-static void text(int x,int y,const char *s,uint8_t r,uint8_t g,uint8_t b){
-    for(;*s;s++,x+=16){
-        unsigned c=(unsigned char)*s;if(c<32||c>127)continue;
-        const uint8_t *glyph=builtin_font+(c-32)*128;
-        for(int row=0;row<16;row++)for(int col=0;col<16;col++){
-            int px=x+col,py=y+row;if(px<0||px>=WIDTH||py<0||py>=HEIGHT)continue;
-            uint8_t packed=glyph[row*8+col/2];int shade=col&1?packed&15:packed>>4;
-            if(shade==15)continue;
-            uint8_t *p=pixels+(py*WIDTH+px)*4;int a=15-shade;
-            p[0]=(r*a+p[0]*shade)/15;p[1]=(g*a+p[1]*shade)/15;p[2]=(b*a+p[2]*shade)/15;p[3]=255;
-        }
-    }
-}
+static void text(int x,int y,const char *s,uint8_t r,uint8_t g,uint8_t b){qpanel_text(pixels,x,y,s,r,g,b);}
 static void panel(bool laser,bool physical_crouch,bool left_handed,bool frame_profile_active,int gun_pitch,bool saved){
 #ifndef TCVR_STEAM_FRAME
     (void)frame_profile_active;
@@ -73,10 +64,10 @@ static void panel(bool laser,bool physical_crouch,bool left_handed,bool frame_pr
 #endif
     }
 #ifdef TCVR_STEAM_FRAME
-    text(24,404,frame_profile_active?"RIGHT A: ADD CREDITS":(left_handed?"X LEFT: ADD CREDITS":"A RIGHT: ADD CREDITS"),181,207,220);
+    text(24,404,"RIGHT STICK RIGHT: LAN PLAY",181,207,220);
     text(24,438,saved?(frame_profile_active?"VIEW TAP: BACK / RIGHT MENU: RESUME":"LEFT MENU: RESUME"):"SAVING FAILED",saved?170:255,saved?193:150,saved?206:150);
 #else
-    text(24,404,left_handed?"X LEFT: ADD CREDITS":"A RIGHT: ADD CREDITS",181,207,220);
+    text(24,404,"RIGHT STICK RIGHT: LAN PLAY",181,207,220);
     text(24,438,saved?"LEFT MENU: RESUME":"SAVING FAILED",saved?170:255,saved?193:150,saved?206:150);
 #endif
 }
@@ -103,8 +94,10 @@ void qui_draw(const float view[16],const float projection[16],V3 head,Q4 rotatio
     if(!program)return;
     GLint bound,unit;glGetIntegerv(GL_ACTIVE_TEXTURE,&unit);glActiveTexture(GL_TEXTURE0);glGetIntegerv(GL_TEXTURE_BINDING_2D,&bound);glBindTexture(GL_TEXTURE_2D,texture);
     int state=(physical_crouch?1:0)|(laser?2:0)|(saved?4:0)|(left_handed?8:0)|(frame_profile_active?16:0);
-    if(last_state!=state||last_pitch!=gun_pitch){
-        panel(laser,physical_crouch,left_handed,frame_profile_active,gun_pitch,saved);last_pitch=gun_pitch;
+    bool lobby=qlobby_visible(); unsigned lobby_revision=qlobby_revision();
+    if(last_state!=state||last_pitch!=gun_pitch||last_lobby!=lobby||(lobby&&last_lobby_revision!=lobby_revision)){
+        if(lobby)qlobby_render(pixels);else panel(laser,physical_crouch,left_handed,frame_profile_active,gun_pitch,saved);
+        last_lobby=lobby;last_lobby_revision=lobby_revision;last_pitch=gun_pitch;
         GLint row_length;glGetIntegerv(GL_UNPACK_ROW_LENGTH,&row_length);glPixelStorei(GL_UNPACK_ROW_LENGTH,0);
         glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,WIDTH,HEIGHT,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);glPixelStorei(GL_UNPACK_ROW_LENGTH,row_length);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);

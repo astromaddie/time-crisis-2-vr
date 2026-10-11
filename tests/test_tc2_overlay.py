@@ -1,6 +1,7 @@
 """Overlay generation is deterministic and never edits the pinned submodule."""
 from pathlib import Path
-import importlib.util, subprocess, tempfile
+import importlib.util, subprocess, tempfile, sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('tc2_overlay',ROOT/'tools/tc2_overlay.py')
 module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)

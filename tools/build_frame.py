@@ -151,7 +151,7 @@ def sha256(path):
 
 def native_source_sha256():
     digest = hashlib.sha256()
-    roots = [ROOT / "quest", ROOT / "link", ROOT / "tools" / "tc2_overlay.py", ROOT / "upstream" / "tc2" / "src",
+    roots = [ROOT / "quest", ROOT / "link", ROOT / "tools" / "tc2_overlay.py", ROOT / "tools" / "tc2_reset_overlay.py", ROOT / "upstream" / "tc2" / "src",
              ROOT / "upstream" / "tc2" / "gen", ROOT / "upstream" / "tc2" / "include",
              ROOT / "tools" / "prepare_tc2.py", ROOT / "tools" / "build_frame.py"]
     files = []

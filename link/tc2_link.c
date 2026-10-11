@@ -45,6 +45,13 @@ static size_t txlen, incoming_len, outgoing_len;
 static uint32_t peer_frame;
 static unsigned long sent, received, accepted, checksums;
 static FILE *trace;
+static int managed;
+static TC2Session session_state;
+static uint64_t service_now,last_rx,connection_started,last_ping;
+static void session_connected(void);
+static void session_control(const uint8_t *,unsigned);
+static void session_error(const char *);
+
 static void fail(const char *why) { fprintf(stderr,"[LINK] %s (socket error %d)\n",why,WAIT_ERR); exit(6); }
 static int wait_socket(int writing, int seconds) {
     fd_set f; FD_ZERO(&f); FD_SET(peer,&f); struct timeval t={seconds,0};
@@ -54,21 +61,24 @@ static void disconnected(const char *why) {
     fprintf(stderr,"[LINK] disconnected: %s; the cabinet ROM handles link loss\n",why);
     if((intptr_t)peer>=0) close(peer);
     peer=-1; phase=0; incoming_len=outgoing_len=0;
+    if(managed)session_error(why);
 }
-static void nonblocking(void) {
+static int nonblocking(void) {
 #ifdef _WIN32
-    u_long nb=1; if(ioctlsocket(peer,FIONBIO,&nb)) fail("nonblocking socket failed");
+    u_long nb=1; if(ioctlsocket(peer,FIONBIO,&nb)) return 0;
 #else
-    if(fcntl(peer,F_SETFL,fcntl(peer,F_GETFL,0)|O_NONBLOCK)<0) fail("nonblocking socket failed");
+    if(fcntl(peer,F_SETFL,fcntl(peer,F_GETFL,0)|O_NONBLOCK)<0) return 0;
 #endif
+    return 1;
 }
 static void connected(void) {
-    nonblocking();
+    if(!nonblocking()) { disconnected("Socket setup failed"); return; }
     int one=1; setsockopt(peer,IPPROTO_TCP,TCP_NODELAY,(const char *)&one,sizeof one);
 #ifdef SO_NOSIGPIPE
     setsockopt(peer,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof one);
 #endif
     phase=3; fprintf(stderr,"[LINK] connected side=%d sync=%d\n",side,synchronize);
+    if(managed)session_connected();
 }
 static void flush_output(void) {
     /* Bounded nonblocking work on the emulation thread. Rendering never waits
@@ -134,12 +144,17 @@ static void receive_records(void) {
     while(incoming_len-at>=2) {
         uint8_t *record_data=incoming+at;
         unsigned n=(record_data[0]<<8)|record_data[1];
-        int control=n==0x8004; if(control)n=4;
+        int control=(n&0x8000)!=0; if(control)n&=0x7fff;
         if(!n || n>8192 || n%2) { disconnected("invalid record length"); return; }
         if(incoming_len-at<n+2) break;
         if(control) {
-            peer_frame=((uint32_t)record_data[2]<<24)|((uint32_t)record_data[3]<<16)|(record_data[4]<<8)|record_data[5];
+            if(managed) {
+                session_control(record_data+2,n);
+                if(phase!=3)return;
+            } else if(n==4) peer_frame=((uint32_t)record_data[2]<<24)|((uint32_t)record_data[3]<<16)|(record_data[4]<<8)|record_data[5];
+            else { disconnected("Unexpected control record"); return; }
         } else {
+            if(managed && session_state.state!=TC2_PLAYING) { disconnected("Peer sent game data before start"); return; }
             if(!regfile || (status&2)) { at+=n+2; continue; } /* ROM must consume the prior RX notification. */
             uint8_t *ram=tc2_vram_ptr(0x06200000);
             for(unsigned i=0;i<n;i++) ram[0x2000+(((regfile[6]*2)+i)&0x1fff)]=record_data[i+2];
@@ -172,7 +187,7 @@ static void network_poll(void) {
     /* One bounded receive per poll; the kernel supplies backpressure. */
     if(incoming_len==sizeof incoming) { disconnected("RX queue overflow"); return; }
     int n=(int)recv(peer,(char *)incoming+incoming_len,(int)(sizeof incoming-incoming_len),0);
-    if(n>0) { incoming_len+=n; receive_records(); }
+    if(n>0) { last_rx=service_now; incoming_len+=n; receive_records(); }
     else if(n==0) disconnected("peer closed");
     else if(WAIT_ERR!=WOULD_BLOCK) disconnected("receive failed");
 }
@@ -251,5 +266,184 @@ void tc2_link_report(void) {
         /* Drain the peer's half-close so queued bytes cannot cause TCP RST. */
         char discard[8192];
         while(wait_socket(0,2)>0) { int n=(int)recv(peer,discard,sizeof discard,0); if(n<=0)break; }
+    }
+}
+
+/* Device reset preserves a negotiated cable; session close owns sockets. */
+void tc2_link_device_reset(void) {
+    regfile=NULL; txptr=0; status=4; tx_due=next_poll=0; txlen=0;
+    peer_frame=0; sent=received=accepted=checksums=0;
+    tc2_irq_line(0x2000,0);
+}
+const char *tc2_link_backup(void) {
+    return tc2_link_enabled() ? (side ? "tc2_link_blue.nv" : "tc2_link_red.nv") : "tc2_backup.nv";
+}
+
+/* Compatibility changes whenever wire rules or emulated link behavior change.
+ * tc2_rom_setup validates the pinned 22-chip timecrs2 set before the host opens. */
+#define TC2_SESSION_ID "TC2VR-LAN2/core0837a397/timecrs2-tss3verb/port1"
+#define TC2_PORT 32123
+#ifdef _WIN32
+static SOCKET discovery=INVALID_SOCKET;
+#else
+static int discovery=-1;
+#endif
+static uint64_t last_discovery;
+static void session_message(TC2SessionState state,const char *message) {
+    session_state.state=state; snprintf(session_state.message,sizeof session_state.message,"%s",message); session_state.revision++;
+}
+static void session_error(const char *message) {
+    /* Preserve the current cabinet until the player chooses Leave: no surprise
+     * reset in the middle of a shot. The lobby owns the visible recovery path. */
+    session_state.compatible=session_state.local_ready=session_state.peer_ready=0;
+    session_message(TC2_ERROR,message);
+}
+static void discovery_close(void) { if((intptr_t)discovery>=0)close(discovery); discovery=-1; }
+static void session_close(void) {
+    if((intptr_t)peer>=0)close(peer);
+    peer=-1; phase=0;
+    discovery_close(); if(trace)fclose(trace); trace=NULL;
+    incoming_len=outgoing_len=0; memset(incoming,0,sizeof incoming); memset(outgoing,0,sizeof outgoing);
+    synchronize=finishing=0; last_rx=last_ping=connection_started=0;
+    tc2_link_device_reset();
+}
+void tc2_link_leave(void) {
+    int reboot=enabled; session_close(); initialized=managed=1; enabled=side=0;
+    unsigned revision=session_state.revision+1;
+    memset(&session_state,0,sizeof session_state); session_state.revision=revision; session_state.restart=reboot;
+    session_message(TC2_OFF,"Choose Host, Find or Join by IP");
+}
+const TC2Session *tc2_link_session(void) { return &session_state; }
+int tc2_link_take_restart(void) { int value=session_state.restart;session_state.restart=0;return value; }
+static void control_send(unsigned op,unsigned value) {
+    uint8_t record_data[68]={0x80,66}; record_data[2]=(uint8_t)op;record_data[3]=(uint8_t)value;
+    unsigned n=6;
+    if(op==1) { snprintf((char *)record_data+4,64,"%s",TC2_SESSION_ID); n=66; }
+    record_data[1]=(uint8_t)n;send_bytes(record_data,n+2);
+}
+static void session_connected(void) {
+    last_rx=connection_started=service_now; discovery_close();
+    session_message(TC2_CONNECTING,"Checking game compatibility..."); control_send(1,(unsigned)side);
+}
+static void play(void) {
+    enabled=1; session_state.restart=1; session_message(TC2_PLAYING,"Linked game - leave to return solo");
+}
+static void session_control(const uint8_t *p,unsigned n) {
+    if(n<6) { disconnected("Invalid session message"); return; }
+    unsigned op=p[0];
+    if(op==1) {
+        char expected[64]={0};snprintf(expected,sizeof expected,"%s",TC2_SESSION_ID);
+        if(n!=66 || memcmp(p+2,expected,64) || p[1]!=(unsigned)(1-side) || session_state.compatible) {
+            disconnected("Game/version mismatch - update both"); return;
+        }
+        session_state.compatible=1;session_message(TC2_LOBBY,"Both players must select Ready");
+    } else if(!session_state.compatible || n!=6) { disconnected("Invalid session handshake"); }
+    else if(op==2 && session_state.state==TC2_LOBBY && p[1]<=1) {
+        session_state.peer_ready=p[1];session_state.revision++;
+    } else if(op==3 && !session_state.host && session_state.state==TC2_LOBBY && session_state.local_ready && session_state.peer_ready) {
+        control_send(4,0); play();
+    } else if(op==4 && session_state.host && session_state.state==TC2_STARTING) play();
+    else if(op!=5) disconnected("Invalid session transition");
+}
+static int socket_runtime(void) {
+#ifdef _WIN32
+    static int ready;
+    if(!ready){WSADATA w;if(WSAStartup(MAKEWORD(2,2),&w)){session_error("Network unavailable");return 0;}ready=1;}
+#endif
+    return 1;
+}
+static int discovery_open(int host) {
+    if(!socket_runtime())return 0;
+    discovery=socket(AF_INET,SOCK_DGRAM,0);if((intptr_t)discovery<0)return 0;
+    int one=1;setsockopt(discovery,SOL_SOCKET,SO_BROADCAST,(const char *)&one,sizeof one);
+#ifdef _WIN32
+    u_long nb=1; if(ioctlsocket(discovery,FIONBIO,&nb)) { discovery_close();return 0; }
+#else
+    if(fcntl(discovery,F_SETFL,O_NONBLOCK)<0){discovery_close();return 0;}
+#endif
+    struct sockaddr_in addr={0};addr.sin_family=AF_INET;addr.sin_port=htons(host?TC2_PORT:0);addr.sin_addr.s_addr=htonl(INADDR_ANY);
+    if(bind(discovery,(struct sockaddr *)&addr,sizeof addr)){discovery_close();return 0;}
+    return 1;
+}
+static void local_address(void) {
+    /* A UDP route lookup sends no traffic. Manual entry remains available when
+     * a machine has multiple interfaces; discovery uses the responding source. */
+#ifdef _WIN32
+    SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
+#else
+    int s=socket(AF_INET,SOCK_DGRAM,0);
+#endif
+    if((intptr_t)s<0)return;
+    struct sockaddr_in addr={0};socklen_t n=sizeof addr;
+    addr.sin_family=AF_INET;addr.sin_port=htons(TC2_PORT);addr.sin_addr.s_addr=htonl(0xffffffff);
+    int one=1;setsockopt(s,SOL_SOCKET,SO_BROADCAST,(const char *)&one,sizeof one);
+    if(connect(s,(struct sockaddr *)&addr,sizeof addr)==0 && getsockname(s,(struct sockaddr *)&addr,&n)==0)
+        inet_ntop(AF_INET,&addr.sin_addr,session_state.address,sizeof session_state.address);
+    close(s);
+}
+static int session_open(const char *ip) {
+    tc2_link_leave();session_state.host=ip==NULL;side=ip?1:0;
+    if(!socket_runtime())return 0;
+    peer=socket(AF_INET,SOCK_STREAM,0);
+    if((intptr_t)peer<0 || !nonblocking()){session_close();session_error("Network unavailable");return 0;}
+    struct sockaddr_in addr={0};addr.sin_family=AF_INET;addr.sin_port=htons(TC2_PORT);
+    connection_started=last_rx=service_now;
+    if(!ip) {
+        int one=1;setsockopt(peer,SOL_SOCKET,SO_REUSEADDR,(const char *)&one,sizeof one);
+        if(bind(peer,(struct sockaddr *)&addr,sizeof addr)||listen(peer,1)) {session_close();session_error("Port busy - leave and retry");return 0;}
+        phase=1;local_address();discovery_open(1);
+        session_message(TC2_WAITING,"Waiting for the blue player...");
+    } else {
+        if(inet_pton(AF_INET,ip,&addr.sin_addr)!=1 || !addr.sin_addr.s_addr || addr.sin_addr.s_addr==0xffffffffu) {
+            session_close();session_error("Enter a valid IPv4 address");return 0;
+        }
+        snprintf(session_state.address,sizeof session_state.address,"%s",ip);
+        session_message(TC2_CONNECTING,"Connecting to red player...");
+        if(connect(peer,(struct sockaddr *)&addr,sizeof addr)==0)connected();
+        else if(WAIT_ERR==IN_PROGRESS)phase=2;
+        else {session_close();session_error("Cannot connect - check IP and Wi-Fi");return 0;}
+    }
+    return 1;
+}
+int tc2_link_host(void) { return session_open(NULL); }
+int tc2_link_join(const char *ip) { return session_open(ip); }
+void tc2_link_find(void) {
+    tc2_link_leave();
+    if(!discovery_open(0)){session_error("Search unavailable - use Join by IP");return;}
+    last_discovery=0;connection_started=service_now;session_message(TC2_FINDING,"Searching local Wi-Fi...");
+}
+void tc2_link_ready(void) {
+    if(session_state.state!=TC2_LOBBY)return;
+    session_state.local_ready=!session_state.local_ready;session_state.revision++;
+    control_send(2,(unsigned)session_state.local_ready);
+}
+void tc2_link_start(void) {
+    if(!session_state.host || session_state.state!=TC2_LOBBY || !session_state.local_ready || !session_state.peer_ready)return;
+    session_message(TC2_STARTING,"Starting both cabinets...");connection_started=service_now;control_send(3,0);
+}
+void tc2_link_service(uint64_t milliseconds) {
+    service_now=milliseconds;
+    if(!managed)return;
+    if(phase)network_poll();
+    if((session_state.state==TC2_CONNECTING || session_state.state==TC2_STARTING) && service_now-connection_started>15000)disconnected("Connection timed out - retry");
+    if(session_state.compatible && phase==3) {
+        if(service_now-last_rx>10000){disconnected("Partner disconnected - leave/retry");return;}
+        if(service_now-last_ping>=1000){last_ping=service_now;control_send(5,0);}
+    }
+    if((intptr_t)discovery<0)return;
+    static const char query[]="TC2VR_FIND_2",reply[]="TC2VR_HOST_2";
+    if(session_state.state==TC2_FINDING && (!last_discovery || service_now-last_discovery>=1000)) {
+        last_discovery=service_now;struct sockaddr_in dest={0};dest.sin_family=AF_INET;dest.sin_port=htons(TC2_PORT);dest.sin_addr.s_addr=htonl(INADDR_BROADCAST);
+        sendto(discovery,query,sizeof query,0,(struct sockaddr *)&dest,sizeof dest);
+        if(service_now-connection_started>5000 && !session_state.found_count)session_message(TC2_FINDING,"No host found - try Join by IP");
+    }
+    char message[32];struct sockaddr_in from={0};socklen_t size=sizeof from;
+    int n=(int)recvfrom(discovery,message,sizeof message,0,(struct sockaddr *)&from,&size);
+    if(session_state.state==TC2_WAITING && n==(int)sizeof query && !memcmp(message,query,sizeof query))
+        sendto(discovery,reply,sizeof reply,0,(struct sockaddr *)&from,size);
+    if(session_state.state==TC2_FINDING && n==(int)sizeof reply && !memcmp(message,reply,sizeof reply)) {
+        char ip[16];inet_ntop(AF_INET,&from.sin_addr,ip,sizeof ip);
+        for(unsigned i=0;i<session_state.found_count;i++)if(!strcmp(ip,session_state.found[i]))return;
+        if(session_state.found_count<4){snprintf(session_state.found[session_state.found_count++],16,"%s",ip);session_message(TC2_FINDING,"Select a host to join");}
     }
 }
