@@ -10,6 +10,8 @@ Built on the native System 23 reconstruction in **[spacestate1/namco22-decompile
 
 *Actual Quest 3 recording. The headset renders a separate tracked view for each eye.*
 
+**Steam Frame prerelease:** Download the prebuilt standalone package from the [v0.1.0 prerelease](https://github.com/astromaddie/time-crisis-2-vr/releases/tag/v0.1.0); no compiler is needed. Bring your own matching US Time Crisis II TSS3 Ver. B arcade ROM data; it is not included.
+
 ## Downloads and installation
 
 | Platform | Download | Start playing |
