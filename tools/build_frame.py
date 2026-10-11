@@ -14,6 +14,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 import prepare_tc2
+import patch_sdl_frame
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "steam-frame"
@@ -154,7 +155,8 @@ def native_source_sha256():
     digest = hashlib.sha256()
     roots = [ROOT / "quest", ROOT / "link", ROOT / "tools" / "tc2_overlay.py", ROOT / "tools" / "tc2_reset_overlay.py", ROOT / "upstream" / "tc2" / "src",
              ROOT / "upstream" / "tc2" / "gen", ROOT / "upstream" / "tc2" / "include",
-             ROOT / "tools" / "prepare_tc2.py", ROOT / "tools" / "build_frame.py"]
+             ROOT / "tools" / "prepare_tc2.py", ROOT / "tools" / "patch_sdl_frame.py",
+             ROOT / "tools" / "build_frame.py"]
     files = []
     for root in roots:
         if root.is_file():
@@ -316,7 +318,9 @@ def package(assets, sdk, java, tools):
     if dex.exists(): shutil.rmtree(dex)
     classes.mkdir(parents=True)
     dex.mkdir(parents=True)
-    java_root = tools / "sdl" / "SDL2-2.30.11" / "android-project" / "app" / "src" / "main" / "java"
+    java_source_root = tools / "sdl" / "SDL2-2.30.11" / "android-project" / "app" / "src" / "main" / "java"
+    java_root = BUILD / "generated-sdl-java"
+    sdl_java_metadata = patch_sdl_frame.prepare_frame_java_view(java_source_root, java_root)
     sources = sorted(java_root.rglob("*.java")) + sorted((ROOT / "quest" / "java").rglob("*.java"))
     argfile = BUILD / "javac.args"
     argfile.write_text("\n".join('"' + str(p).replace('\\', '/') + '"' for p in sources) + "\n", encoding="utf-8")
@@ -408,6 +412,11 @@ def package(assets, sdk, java, tools):
         "version_code": int(version_code), "rom_bundled": False, "required_rom_chips": 22,
         "rom_manifest_sha256": sha256(public_manifest), "hardware_tested": False,
         "toolchain": native_receipt["toolchain"], "dependencies": native_receipt["dependencies"],
+        "sdl_frame_java": {
+            **sdl_java_metadata,
+            "generated_source_view": str(java_root.relative_to(ROOT)),
+            "patch_script_sha256": sha256(ROOT / "tools" / "patch_sdl_frame.py"),
+        },
     }
     (OUTPUT.parent / "build-info.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
