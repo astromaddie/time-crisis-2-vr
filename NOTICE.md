@@ -37,3 +37,12 @@ The repository contains the port, build/import tools and a reference to upstream
 ROM archives, extracted ROMs, signing keys, generated build output and APKs are
 excluded from Git. Downloadable binaries are distributed separately as GitHub
 release assets at https://github.com/DR-89/time-crisis-2-vr/releases.
+
+## Cabinet-link research
+
+The port-owned `link/tc2_link.c` implements the original C139/C422 register and
+DMA boundary. Functional research references are MAME's Namco C139 device
+(Angelo Salese, BSD-3-Clause), [SailorSat's C139 work](https://github.com/mamedev/mame/pull/13421),
+and [MAME-TC2-Public at 5ff99b9](https://github.com/pocketjazzy/MAME-TC2-Public/commit/5ff99b9da5b528de1c5be484115ea3dc014efd3a).
+The adapter is an independent implementation; it does not incorporate that fork's
+ROM code patches, game RAM repairs, heartbeat fabrication or packet replay.
