@@ -6,6 +6,8 @@ _Bool qkeyboard_modal(void){return keyboard_modal_test;}
 #define TCVR_INPUT_TEST
 #include "../quest/quest_host.c"
 
+static bool applied_filter=true;static unsigned filter_calls;
+void tc2_gl_set_filter(int enabled){applied_filter=enabled!=0;filter_calls++;}
 static char paths[40][100];
 static unsigned path_count,action_count,space_count,binding_count;
 static XrActionSuggestedBinding suggested[20];
@@ -13,7 +15,13 @@ static XrActionSuggestedBinding frame_suggested[20],touch_suggested[20];
 static unsigned frame_binding_count,touch_binding_count;
 static XrActionType types[16];
 static bool dual[16],buttons[16][3],connected[2]={true,true},tracked[2]={true,true};
-static float stick_y,stick_x;
+static float stick_x,stick_y;
+float qvr_world_scale=1.f;
+float qvr_units_per_meter=2.f/3.f;
+float qvr_view_distance;
+int qtc2_cabinet_side=1;
+static float distance_x,distance_y;
+static bool distance_active=true;
 static bool stick_active=true;
 static Q4 controller_rotation={0,0,0,1};
 static float triggers[2],grips[2];
@@ -96,8 +104,9 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetActionStatePose(XrSession s,const XrActionSt
     out->isActive=connected[h];return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrGetActionStateVector2f(XrSession s,const XrActionStateGetInfo *get,XrActionStateVector2f *out){
-    (void)s;assert(get->action==pitch_action&&get->subactionPath==XR_NULL_PATH);
+    (void)s;assert((get->action==pitch_action||get->action==distance_action)&&get->subactionPath==XR_NULL_PATH);
     assert(types[id(get->action)]==XR_ACTION_TYPE_VECTOR2F_INPUT);
+    if(get->action==distance_action){out->isActive=distance_active&&connected[LEFT_HAND];out->currentState=(XrVector2f){distance_x,distance_y};return XR_SUCCESS;}
     out->isActive=stick_active&&connected[RIGHT_HAND];out->currentState=(XrVector2f){stick_x,stick_y};return XR_SUCCESS;
 }
 XRAPI_ATTR XrResult XRAPI_CALL xrLocateSpace(XrSpace space,XrSpace base,XrTime t,XrSpaceLocation *out){
@@ -147,7 +156,8 @@ int main(void){
     options_path="frame-profile-test.cfg";qoptions_load(options_path,&options);
     assert(options.laser_enabled&&!options.left_handed);instance=(XrInstance)(uintptr_t)1;session=(XrSession)(uintptr_t)1;
     running=focused=origin_set=true;frame_profile_supported=true;
-    assert(actions_init());assert(space_count==2&&frame_binding_count==16&&touch_binding_count==16);
+    assert(actions_init());assert(space_count==2&&frame_binding_count==17&&touch_binding_count==17);
+    require_binding(frame_suggested,frame_binding_count,distance_action,"/user/hand/left/input/thumbstick");
     const char *hands[]={"/user/hand/left","/user/hand/right"};
     for(int h=0;h<2;h++){
         char name[100];
@@ -224,8 +234,8 @@ int main(void){
     assert(capture_eye(1,2,2)&&access("capture.request",F_OK)!=0&&!frame_probe.capture_once);
     assert(access("eye-0.ppm",F_OK)==0&&access("eye-1.ppm",F_OK)==0);
     unlink("eye-0.ppm");unlink("eye-1.ppm");frame_probe.enabled=false;
-    paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
-    assert(qlobby_visible());stick_x=0;tick();
+    paused=true;stick_y=stick_x=distance_x=distance_y=0;options_page=QOPTIONS_PAGE_GRAPHICS;tick();distance_y=1;tick();
+    assert(options_page==OPTIONS_LAN_PAGE&&qlobby_visible());distance_y=0;tick();
     qlobby_input(QL_DOWN);qlobby_input(QL_DOWN);qlobby_input(QL_ACCEPT);assert(qlobby_editing());
     qlobby_replace_text("192.168.1.42");
     keyboard_modal_test=true;buttons[id(lower_action)][RIGHT_HAND]=true;triggers[RIGHT_HAND]=1;tick();
@@ -252,7 +262,7 @@ int main(void){
     get_rate=NULL;request_rate=NULL;
     options_path="handedness-test.cfg";qoptions_load(options_path,&options);
     assert(!options.left_handed);instance=(XrInstance)(uintptr_t)1;session=(XrSession)(uintptr_t)1;
-    running=focused=origin_set=true;assert(actions_init());assert(space_count==2&&binding_count==16);
+    running=focused=origin_set=true;assert(actions_init());assert(space_count==2&&binding_count==17);
     for(int h=0;h<2;h++){
         char name[100];const char *prefix=h?"/user/hand/right":"/user/hand/left";
         snprintf(name,sizeof name,"%s/input/aim/pose",prefix);bound(aim_action,name);
@@ -304,7 +314,7 @@ int main(void){
     /* Focus loss/pause/sync errors cannot replay a held trigger or button. */
     focused=false;tick();assert(arcade_bits==0);buttons[id(upper_action)][RIGHT_HAND]=true;
     focused=true;tick();assert(!options.laser_enabled&&trigger==0);
-    buttons[id(upper_action)][RIGHT_HAND]=false;tick();click(upper_action,RIGHT_HAND);assert(options.laser_enabled);
+    buttons[id(upper_action)][RIGHT_HAND]=false;tick();click(upper_action,RIGHT_HAND);assert(options.tracer_enabled&&!options.laser_enabled);click(upper_action,RIGHT_HAND);assert(options.laser_enabled);
     sync_result=XR_ERROR_RUNTIME_FAILURE;tick();assert(trigger==0&&pedal==0);
     buttons[id(upper_action)][RIGHT_HAND]=true;sync_result=XR_SUCCESS;tick();assert(options.laser_enabled&&trigger==0);
     buttons[id(upper_action)][RIGHT_HAND]=false;tick();
@@ -374,8 +384,185 @@ int main(void){
     replay_input=true;arcade_bits=0x30;g_ss22_gun_x=456;g_ss22_gun_y=123;g_ss22_gun_off=false;
     for(int n=0;n<120;n++){ss22_input_update();ss22_input_neutral();assert(arcade_bits==0x30&&g_ss22_gun_x==456&&g_ss22_gun_y==123&&!g_ss22_gun_off);}
     replay_input=false;ss22_input_neutral();assert(arcade_bits==0);
-    paused=true;stick_y=stick_x=0;tick();stick_x=1;tick();
-    assert(qlobby_visible());stick_x=0;tick();
+    /* World size: neutral arm, repeat delay, dead zone, diagonal isolation,
+     * focus/action loss, persistence and bounds. Physical poses stay in metres. */
+    paused=true;stick_x=stick_y=0;tick();set_world_scale(100);
+    V3 physical_gun=gun_position,physical_muzzle=gun_origin;
+    stick_x=1;sync_input(1000,true,1.7f);assert(options.world_scale==105);
+    sync_input(399999999,true,1.7f);assert(options.world_scale==105);
+    sync_input(400001000,true,1.7f);assert(options.world_scale==110);
+    sync_input(500001000,true,1.7f);assert(options.world_scale==115);
+    qoptions_load(options_path,&saved);assert(saved.world_scale==115&&options_saved);
+    assert(fabsf(qvr_world_scale-1.15f)<1e-6f);
+    assert(gun_position.x==physical_gun.x&&gun_position.y==physical_gun.y&&gun_position.z==physical_gun.z);
+    assert(gun_origin.x==physical_muzzle.x&&gun_origin.y==physical_muzzle.y&&gun_origin.z==physical_muzzle.z);
+    stick_active=false;tick();stick_active=true;tick();assert(options.world_scale==115);
+    stick_x=0;tick();stick_x=-1;tick();assert(options.world_scale==110);
+    focused=false;tick();focused=true;tick();assert(options.world_scale==110);
+    stick_x=NAN;tick();stick_x=-1;tick();assert(options.world_scale==110);
+    stick_x=0;tick();stick_x=.5f;tick();assert(options.world_scale==110);
+    stick_x=1;stick_y=.8f;tick();assert(options.world_scale==115&&options.gun_pitch==0);
+    stick_x=stick_y=0;tick();stick_x=.8f;stick_y=1;tick();assert(options.world_scale==115&&options.gun_pitch==1);
+    stick_x=stick_y=0;tick();click(pause_action,2);assert(!paused);
+    stick_x=1;tick();assert(options.world_scale==115);
+    click(pause_action,2);assert(paused);tick();assert(options.world_scale==115);
+    stick_x=0;tick();stick_x=1;tick();assert(options.world_scale==120);
+    set_world_scale(1000);assert(options.world_scale==400&&qvr_world_scale==4.f);
+    set_world_scale(-1);assert(options.world_scale==25&&qvr_world_scale==.25f);
+    qoptions_load(options_path,&saved);assert(saved.world_scale==25&&saved.gun_pitch==1);
+    bound(distance_action,"/user/hand/left/input/thumbstick");
+    stick_x=stick_y=0;distance_x=0;tick();set_view_distance(40);
+    physical_gun=gun_position;physical_muzzle=gun_origin;
+    distance_x=1;sync_input(1000,true,1.7f);assert(options.view_distance==45);
+    sync_input(399999999,true,1.7f);assert(options.view_distance==45);
+    sync_input(400001000,true,1.7f);assert(options.view_distance==50);
+    sync_input(500001000,true,1.7f);assert(options.view_distance==55);
+    qoptions_load(options_path,&saved);assert(saved.view_distance==55&&fabsf(qvr_view_distance-.55f)<1e-6f);
+    assert(gun_position.z==physical_gun.z&&gun_origin.z==physical_muzzle.z);
+    distance_active=false;tick();distance_active=true;tick();assert(options.view_distance==55);
+    distance_x=0;tick();distance_x=-1;tick();assert(options.view_distance==50);
+    focused=false;tick();focused=true;tick();assert(options.view_distance==50);
+    distance_x=NAN;tick();distance_x=-1;tick();assert(options.view_distance==50);
+    distance_x=0;tick();distance_x=.5f;tick();assert(options.view_distance==50);
+    distance_x=.8f;distance_y=1;tick();assert(options.view_distance==50);
+    distance_x=distance_y=0;tick();click(pause_action,2);assert(!paused);
+    distance_x=1;tick();assert(options.view_distance==50);
+    click(pause_action,2);assert(paused);tick();assert(options.view_distance==50);
+    distance_x=0;tick();distance_x=1;tick();assert(options.view_distance==55);
+    set_view_distance(1000);assert(options.view_distance==100&&qvr_view_distance==1);
+    set_view_distance(-1);assert(options.view_distance==0&&qvr_view_distance==0);
+    /* Tracer is triggered by accepted shots, frozen at that ray, and expires
+     * independently of a held trigger or 72/90/120-Hz presentation. */
+    paused=false;options.laser_enabled=options.tracer_enabled=false;
+    cycle_aim_guide();assert(options.tracer_enabled&&!options.laser_enabled);
+    gun_tracked=aim_valid=focused=true;gun_origin=v3(.1f,.2f,-.3f);gun_hit=v3(.5f,.6f,-4);
+    shot_feedback(1000);assert(qtracer_opacity(&tracer,1000)==1);
+    gun_hit=v3(0,0,-8);assert(tracer.end.x==.5f&&tracer.end.z==-4);
+    for(int rate=72;rate<=120;rate+=24){
+        for(int ms=0;ms<180;ms+=1000/rate){float a=qtracer_opacity(&tracer,1000+ms);assert(a>=0&&a<=1);if(ms>=65)assert(a==0);}
+    }
+    assert(qtracer_opacity(&tracer,999)==0&&qtracer_opacity(&tracer,1065)==0);
+    paused=true;tracer.active=false;shot_feedback(2000);assert(!tracer.active);paused=false;
+    cycle_aim_guide();assert(options.laser_enabled&&!options.tracer_enabled);shot_feedback(2000);assert(!tracer.active);
+    cycle_aim_guide();assert(!options.laser_enabled&&!options.tracer_enabled);
+    /* Gun-fit page, per-axis offsets and saved next-boot cabinet side. */
+    paused=true;options_page=0;stick_x=stick_y=distance_x=distance_y=0;tick();
+    distance_y=1;tick();assert(options_page==1);tick();assert(options_page==1);
+    distance_y=0;tick();stick_y=1;sync_input(1000,true,1.7f);assert(options.gun_offset_y_mm==5);
+    stick_y=0;tick();stick_x=1;sync_input(1000,true,1.7f);assert(options.gun_offset_z_mm==5);
+    stick_x=0;distance_x=1;tick();assert(options.player_side==2&&qtc2_cabinet_side==1);
+    qoptions_load(options_path,&saved);assert(saved.player_side==2&&saved.gun_offset_y_mm==5&&saved.gun_offset_z_mm==5);
+    set_gun_offset(true,999);set_gun_offset(false,-999);assert(options.gun_offset_y_mm==200&&options.gun_offset_z_mm==-200);
+    set_gun_offset(true,20);set_gun_offset(false,40);controller_rotation=(Q4){0,0,0,1};tick();
+    V3 fitted=gun_position,muzzle=gun_origin;set_gun_offset(true,0);set_gun_offset(false,0);tick();
+    assert(fabsf(fitted.y-gun_position.y-.02f)<1e-6f&&fabsf(fitted.z-gun_position.z-.04f)<1e-6f&&fitted.x==gun_position.x);
+    assert(fabsf(muzzle.y-gun_origin.y-.02f)<1e-6f&&fabsf(muzzle.z-gun_origin.z-.04f)<1e-6f);
+    /* Offsets follow the hand, not world axes, and ignore world-size settings. */
+    controller_rotation=(Q4){0,sinf(.6f),0,cosf(.6f)};tick();V3 base=gun_position;
+    set_gun_offset(false,40);tick();V3 delta=rotate(controller_rotation,v3(0,0,.04f));
+    assert(fabsf(gun_position.x-base.x-delta.x)<1e-6f&&fabsf(gun_position.z-base.z-delta.z)<1e-6f);
+    set_world_scale(400);tick();assert(fabsf(gun_position.x-base.x-delta.x)<1e-6f);
+    click(pitch_reset_action,2);assert(options.gun_offset_y_mm==0&&options.gun_offset_z_mm==0);
+    for(int side=1;side<=2;side++)for(int input=0;input<256;input++){
+        uint8_t result=qtc2_cabinet_switch(input,side);assert((result&~4)==(input&~4));assert(!!(result&4)==(side==1));
+    }
+    /* Route selection is bounded, big-endian, and never changes default P1.
+     * Out-of-range native state must not become a seemingly valid route. */
+    static uint8_t route_ram[0x2f3fd9];route_ram[0x2f3fd8]=0xa5;
+    assert(!qtc2_route_select(NULL,sizeof route_ram,2));
+    for(int mode=0;mode<4;mode++)for(int route=0;route<4;route++)for(int side=1;side<=2;side++){
+        route_ram[0x2f3fd3]=mode;route_ram[0x2f3fd7]=route;
+        assert(!qtc2_route_select(route_ram,0x2f3fd7,side));
+        bool valid=side==2&&mode>=1&&mode<=2&&route<=1;
+        assert(qtc2_route_select(route_ram,sizeof route_ram,side)==valid);
+        assert(route_ram[0x2f3fd7]==(valid?1:route));
+        assert(route_ram[0x2f3fd3]==mode&&route_ram[0x2f3fd8]==0xa5);
+    }
+    for(int i=0;i<3;i++){
+        memset(route_ram,0,sizeof route_ram);route_ram[0x2f3fd3]=1;route_ram[0x2f3fd4+i]=1;
+        assert(!qtc2_route_select(route_ram,sizeof route_ram,2));
+        memset(route_ram,0,sizeof route_ram);route_ram[0x2f3fd3]=1;route_ram[0x2f3fd0+i]=1;
+        assert(!qtc2_route_select(route_ram,sizeof route_ram,2));
+    }
+    /* Menu-only filtering, fixed physical left grip in either hand layout. */
+    memset(buttons,0,sizeof buttons);triggers[0]=triggers[1]=0;
+    stick_x=stick_y=distance_x=distance_y=0;connected[0]=connected[1]=true;
+    focused=true;paused=false;reset_input_edges();options.texture_filtering=true;
+    grips[0]=grips[1]=0;tick();
+    grips[0]=1;tick();assert(options.texture_filtering); /* Gameplay grip keeps cover role. */
+    click(pause_action,2);assert(paused&&options.texture_filtering);
+    tick();assert(options.texture_filtering); /* Held across opening: no toggle. */
+    grips[0]=0;tick();grips[0]=1;tick();assert(!options.texture_filtering&&!applied_filter);
+    unsigned calls=filter_calls;for(int j=0;j<10;j++)tick();assert(filter_calls==calls);
+    QOptions filtered;qoptions_load(options_path,&filtered);assert(!filtered.texture_filtering);
+    for(int hand=0;hand<2;hand++){
+        options.left_handed=hand;bool before=options.texture_filtering;
+        grips[0]=0;tick();grips[1]=1;tick();assert(options.texture_filtering==before);
+        grips[0]=.4f;tick();assert(options.texture_filtering==before);
+        grips[0]=.8f;tick();assert(options.texture_filtering!=before&&applied_filter==options.texture_filtering);
+        before=options.texture_filtering;
+        focused=false;tick();focused=true;tick();assert(options.texture_filtering==before);
+        connected[0]=false;tick();connected[0]=true;tick();assert(options.texture_filtering==before);
+        grips[0]=NAN;tick();grips[0]=1;tick();assert(options.texture_filtering==before);
+        grips[0]=0;tick();grips[0]=1;tick();assert(options.texture_filtering!=before);
+    }
+    puts("PASS: saved filtering default and live renderer application; menu-only left grip, both handedness layouts, one change per press, held-open/focus/disconnect/NaN guards");
+    puts("PASS: world-scale controls/persistence/physical poses; real host controls, gun pitch persistence/bounds/repeat/reset, model/muzzle/aim alignment in both hands, local-space correction, focus/action loss and existing input regressions");
+    /* Traverse every page, require release across transitions, and select
+     * resolution without accidentally changing world/gun/player settings. */
+    focused=true;paused=true;connected[0]=connected[1]=true;options_page=0;
+    options.resolution=0;grips[0]=grips[1]=stick_x=stick_y=distance_x=distance_y=0;
+    reset_input_edges();tick();
+    for(int page=1;page<QOPTIONS_PAGE_COUNT;page++){
+        distance_y=1;tick();assert(options_page==page);
+        tick();assert(options_page==page);
+        distance_y=0;tick();
+    }
+    assert(options_page==QOPTIONS_PAGE_GRAPHICS);
+    int old_world=options.world_scale,old_pitch=options.gun_pitch,old_distance=options.view_distance;
+    for(int preset=1;preset<=QRESOLUTION_COUNT;preset++){
+        stick_x=1;tick();assert(options.resolution==preset%QRESOLUTION_COUNT);
+        sync_input(9999999999LL,true,1.7f);assert(options.resolution==preset%QRESOLUTION_COUNT);
+        stick_x=0;tick();
+    }
+    stick_x=-1;tick();assert(options.resolution==5);stick_x=0;tick();
+    QOptions selected;qoptions_load(options_path,&selected);assert(selected.resolution==5);
+    stick_y=1;distance_x=1;tick();assert(options.resolution==5);
+    assert(options.world_scale==old_world&&options.gun_pitch==old_pitch&&options.view_distance==old_distance);
+    stick_y=distance_x=0;tick();click(pitch_reset_action,2);assert(options.resolution==0);
+    stick_x=1;focused=false;tick();focused=true;tick();assert(options.resolution==0);
+    stick_x=0;tick();stick_x=1;tick();assert(options.resolution==1);
+    connected[1]=false;tick();connected[1]=true;tick();assert(options.resolution==1);
+    stick_x=NAN;tick();stick_x=1;tick();assert(options.resolution==1);
+    /* After Graphics comes LAN play; its Back returns to page 0, and down
+     * from page 0 wraps to LAN play. */
+    stick_x=0;tick();distance_y=1;tick();assert(options_page==OPTIONS_LAN_PAGE&&qlobby_visible());
+    distance_y=0;tick();click(upper_action,RIGHT_HAND);qlobby_tick(0);tick();assert(!qlobby_visible()&&options_page==0);
+    distance_y=-1;tick();assert(options_page==OPTIONS_LAN_PAGE&&qlobby_visible());
+    distance_y=0;tick();click(upper_action,RIGHT_HAND);qlobby_tick(0);tick();assert(options_page==0);
+    for(int k=0;k<2;k++){distance_y=1;tick();distance_y=0;tick();}
+    assert(options_page==QOPTIONS_PAGE_GRAPHICS);
+    distance_y=0;tick();click(pause_action,2);assert(!paused);
+    stick_x=1;tick();assert(options.resolution==1);
+    click(pause_action,2);assert(paused&&options.resolution==1);
+    stick_x=0;tick();stick_x=1;tick();assert(options.resolution==2);
+    /* The same helper drives actual OpenXR/GL swapchain dimensions. */
+    const uint32_t expected[6][2]={{1360,1440},{1280,1344},{1680,1760},{2550,2640},{2940,3080},{3360,3520}};
+    uint32_t w,h;
+    for(int preset=0;preset<6;preset++){
+        assert(qresolution_choose(preset,1360,1440,4096,4096,&w,&h));
+        assert(w==expected[preset][0]&&h==expected[preset][1]);
+    }
+    assert(!qresolution_choose(5,1360,1440,3360,3519,&w,&h)&&w==1360&&h==1440);
+    assert(!qresolution_choose(3,1360,1440,2549,2640,&w,&h)&&w==1360&&h==1440);
+    assert(qresolution_choose(3,1360,1440,2550,2640,&w,&h)&&w==2550&&h==2640);
+    assert(qresolution_choose(0,2000,2160,1800,1900,&w,&h)&&w==1800&&h==1900);
+    assert(!qresolution_choose(-1,1360,1440,4096,4096,&w,&h)&&w==1360&&h==1440);
+    assert(!qresolution_choose(6,1360,1440,4096,4096,&w,&h)&&w==1360&&h==1440);
+    puts("PASS: resolution page navigation, release/focus/disconnect guards, cycling/reset/persistence and runtime/GPU dimension limits");
+    /* LAN play follows Graphics; leaving the lobby returns to page 0. */
+    paused=true;stick_x=stick_y=distance_x=distance_y=0;options_page=QOPTIONS_PAGE_GRAPHICS;tick();
+    distance_y=1;tick();assert(options_page==OPTIONS_LAN_PAGE&&qlobby_visible());distance_y=0;tick();
     qlobby_input(QL_DOWN);qlobby_input(QL_DOWN);qlobby_input(QL_ACCEPT);assert(qlobby_editing());
     qlobby_replace_text("192.168.1.42");
     keyboard_modal_test=true;buttons[id(lower_action)][RIGHT_HAND]=true;triggers[RIGHT_HAND]=1;tick();
@@ -384,7 +571,9 @@ int main(void){
     buttons[id(lower_action)][RIGHT_HAND]=false;triggers[RIGHT_HAND]=0;tick();
     click(upper_action,RIGHT_HAND);assert(qlobby_visible()&&!qlobby_editing());
     click(upper_action,RIGHT_HAND);qlobby_tick(0);assert(!qlobby_visible());
-    puts("PASS: TC2 four-credit sequence and gun ADC bounds; real host controls, gun pitch persistence/bounds/repeat/reset, model/muzzle/aim alignment in both hands, local-space correction, focus/action loss and existing input regressions");
+    tick();assert(options_page==0);
+    stick_x=1;tick();assert(!qlobby_visible());stick_x=0;tick();
+    puts("PASS: LAN page and lobby input: page cycle, modal keyboard, Back to options");
     return 0;
 }
 #endif

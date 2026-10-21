@@ -1,11 +1,13 @@
 # Time Crisis II VR - Quickstart
 
-Download **v0.2.0** from the [release page](https://github.com/DR-89/time-crisis-2-vr/releases/tag/v0.2.0). The current Quest and Windows packages include the game files and animated weapons. Steam Frame development builds are separate and ROM-free; see below.
+**v0.3.3:** left menu opens options; left stick up/down selects **GRAPHICS**. Right stick left/right selects a per-eye resolution; fully restart the app to apply it. Left grip toggles texture filtering immediately (default ON). Launcher icons and banners are included.
+
+Download **v0.3.3** from the [release page](https://github.com/DR-89/time-crisis-2-vr/releases/tag/v0.3.3). Both packages include the game files and animated weapons. Steam Frame builds are separate and ROM-free; see below.
 
 ## Quest 3
 
 1. Enable developer mode and accept USB debugging in the headset.
-2. Sideload `TimeCrisis2VR-v0.2.0-quest3.apk` with SideQuest or `adb install -r TimeCrisis2VR-v0.2.0-quest3.apk`.
+2. Sideload `TimeCrisis2VR-v0.3.3-quest3.apk` with SideQuest or `adb install -r TimeCrisis2VR-v0.3.3-quest3.apk`.
 3. Open **Time Crisis II VR (Test)** from **Unknown sources**.
 4. Wait for the arcade startup. Press **A** for credits, then either trigger to start.
 
@@ -18,29 +20,33 @@ Download **v0.2.0** from the [release page](https://github.com/DR-89/time-crisis
 
 See [PCVR setup](PCVR.md) for runtime and troubleshooting details.
 
-## Steam Frame (macOS build)
+## Steam Frame
 
-The Steam Frame flavor is an ARM64 Android/OpenXR developer build with package ID `org.timecrisis2.frame`. Its APK and installer bundle are ROM-free; on first launch, select your own `timecrs2.zip` or copy it to `/sdcard/Documents/TimeCrisis2VR/timecrs2.zip`. The launcher verifies all 22 required chips by hash and stores the archive, extracted chips, settings, logs, and captures in `Documents/TimeCrisis2VR`.
-
-Build on macOS with the pinned Android SDK/NDK and the already verified shared dependency cache:
+The Steam Frame build is a standalone ARM64 Android/OpenXR app that SteamOS runs through Lepton, package `org.timecrisis2.frame`. The APK and installer bundle contain no ROM: the installer copies your own `timecrs2.zip` to the Frame, and the app checks all 22 chips by SHA-256 before using it. There is no prebuilt release yet; build it on macOS:
 
 ```sh
-python3 tools/build_frame.py --rom "$HOME/Downloads/timecrs2.zip" --shared-tools /path/to/time-crisis-vr/.tools --jobs 2
+python3 tools/bootstrap_frame.py
+python3 tools/build_frame.py --rom "$HOME/Downloads/timecrs2.zip" --jobs 4
+python3 tools/steam_frame/make_bundle.py
+python3 artifacts/steam-frame/bundle/install.py --install --rom "$HOME/Downloads/timecrs2.zip" --host steamos@YOUR_FRAME_ADDRESS
 ```
 
-The APK is written to `artifacts/steam-frame/TimeCrisis2VR-SteamFrame-arm64.apk`; `artifacts/steam-frame/bundle` contains the checksummed ROM-free installer. The bundle defaults to local verification or a non-writing dry run. Installation requires an explicit `--install`, a matching Steam Frame booking lock script, and the user's ROM path; see [Steam Frame verification](VR_ARCHITECTURE.md).
-
-With the Steam Frame controller profile active, either trigger fires, either grip leaves cover, right A adds credits, right B toggles the laser, right Menu opens/resumes options, and right X changes cover mode in options. Left View taps back/resume, holds for one second to recenter, or holds for three seconds to recenter and calibrate upright height. OpenXR Touch remains available as a fallback.
+Then launch **TimeCrisis2VR** from the Steam library. See [Steam Frame](STEAM_FRAME_VR.md) for requirements, controls and status.
 
 ## Playing
 
 - **Either trigger:** move the weapon to that hand and shoot.
 - **Hold either grip:** leave cover. **Release both:** hide and reload.
-- **A:** credits. **B:** laser on/off. **X:** recenter and calibrate upright height.
+- **A:** credits. **B:** cycle LASER / OFF / TRACER. **X:** recenter and calibrate upright height.
 - **Left menu button:** options. In options, right stick click changes the default hand; right stick up/down changes **GUN ANGLE**; left stick click resets the angle.
-- **Y in options:** switch physical ducking / grip cover. With physical ducking selected, calibrate upright using **X**, then duck to hide and stand back up to shoot.
+- **Y in options:** switch physical ducking / grip cover. With physical ducking selected, calibrate upright using **X**, then lean or duck the way the **SAFE** sign points to hide, and come back upright to shoot.
 - The arcade selects the machine gun automatically. Hold the trigger for automatic fire outside cover.
+- **LAN play:** in options, move the left stick up through the pages (Options, Gun Fit / Player, Graphics) to **LAN PLAY**. One player hosts, the other uses **Find a Game** (or **Join by IP**); both select Ready and the host starts. See [LAN play](LAN-PLAY.md).
 
-These face buttons assume the default right hand. The saved left-hand layout uses **X** for credits, **Y** for laser, **A** for recenter and **B** for cover-mode selection. Trigger handoffs do not change the saved face-button layout.
+These face buttons assume the default right hand. The saved left-hand layout uses **X** for credits, **Y** for aim mode, **A** for recenter and **B** for cover-mode selection. Trigger handoffs do not change the saved face-button layout.
 
-Laser assistance starts on; saved choices are retained. The release remains experimental and has not passed a complete-game playthrough. Full controls, test status and credits are in the [README](../README.md).
+**World size:** in options, right stick left/right adjusts WORLD SIZE; left stick left/right adjusts VIEW DISTANCE. Start with **100% / 0 cm** in a running level.
+
+**Gun fit / Robert:** left stick up/down switches to GUN FIT / PLAYER. Right stick up/down adjusts gun height and right/left pulls it back/forward in 5 mm steps. Left click resets both offsets. Left stick left/right selects Keith or Robert; fully restart the app to apply the route. Robert is an experimental standalone route, not linked multiplayer.
+
+Laser assistance starts on; saved choices are retained. Choose TRACER for a brief orange shot line without a permanent laser. The release remains experimental and has not passed a complete-game playthrough. Full controls, test status and credits are in the [README](../README.md).

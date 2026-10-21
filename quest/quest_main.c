@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "tc2_cabinet.h"
 int tc_game_main(int,char**);
 #ifdef TCVR_STEAM_FRAME
 int tc2_window_active(void);
@@ -20,6 +21,7 @@ int SDL_main(int argc,char **argv) {
     freopen("timecrisis2-vr.log","w",stderr);setvbuf(stderr,NULL,_IOLBF,0);
     setenv("SDL_ACCELEROMETER_AS_JOYSTICK","0",1);
     char *args[]={"TimeCrisis2VR","--window",NULL};
+    qtc2_cabinet_configure("quest-options.cfg");
     int result=tc_game_main(2,args);
 #ifdef TCVR_STEAM_FRAME
     if(tc2_window_active()) {

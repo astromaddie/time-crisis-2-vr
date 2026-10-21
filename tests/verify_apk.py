@@ -1,7 +1,10 @@
 """Verify ROM integrity, the ARM64 ELF headers, manifest identity and exported entry point."""
 from pathlib import Path
-import argparse,hashlib,json,math,re,struct,subprocess,zipfile
+import argparse,os,hashlib,json,math,re,struct,subprocess,zipfile
 ROOT=Path(__file__).resolve().parents[1]
+SDK=Path(os.environ.get('ANDROID_SDK_ROOT',ROOT/'.tools/android-sdk'))
+BUILD_TOOLS=os.environ.get('ANDROID_BUILD_TOOLS_VERSION','35.0.1')
+NDK_VERSION=os.environ.get('ANDROID_NDK_VERSION','28.2.13676358')
 p=argparse.ArgumentParser();p.add_argument('--apk',type=Path,default=ROOT/'artifacts/bundled/TimeCrisis2VR-with-ROM.apk');args=p.parse_args()
 apk=args.apk.resolve();info=json.loads(apk.with_name('build-info.json').read_text());bundled=info['roms_bundled']
 with zipfile.ZipFile(apk) as z:
@@ -14,7 +17,7 @@ with zipfile.ZipFile(apk) as z:
         data=z.read('assets/roms/'+name) if bundled else (ROOT/'build/assets/roms'/name).read_bytes()
         assert hashlib.sha256(data).hexdigest()==digest,name
     model_manifest=z.read('assets/models.sha256').decode().splitlines()
-    assert {line.split('  ',1)[1] for line in model_manifest}=={'player-gun.tcgun','machine-gun.tcgun'}
+    assert {line.split('  ',1)[1] for line in model_manifest}=={'player-gun.tcgun','machine-gun.tcgun','namco-gun.tcgun'}
     for line in model_manifest:
         digest,name=line.split('  ',1);model=z.read('assets/models/'+name)
         assert hashlib.sha256(model).hexdigest()==digest,name
@@ -44,11 +47,14 @@ with zipfile.ZipFile(apk) as z:
         elf=z.read(lib);assert elf[:5]==b'\x7fELF\x02';assert struct.unpack_from('<H',elf,18)[0]==183,lib
     assert z.read('classes.dex')[:4]==b'dex\n'
     for name in ['namco22-LICENSE.txt','SDL2-LICENSE.txt','OpenXR-LICENSE.txt']:assert z.read('assets/licenses/'+name)
-badging=subprocess.check_output([str(ROOT/'.tools/android-sdk/build-tools/35.0.1/aapt.exe'),'dump','badging',str(apk)],text=True)
+    notice=z.read('assets/licenses/NOTICE.md').decode()
+    assert 'Martoscar' in notice and 'https://creativecommons.org/licenses/by/4.0/' in notice
+    assert '15fbd5b9add94a34b5c21746e3dd32be' in notice
+badging=subprocess.check_output([str(SDK/'build-tools'/BUILD_TOOLS/'aapt.exe'),'dump','badging',str(apk)],text=True)
 assert "package: name='org.timecrisis2.arcadevr'" in badging
 entry='MainActivity' if bundled else 'LauncherActivity'
 assert f"launchable-activity: name='org.timecrisis2.arcadevr.{entry}'" in badging
-tree=subprocess.check_output([str(ROOT/'.tools/android-sdk/build-tools/35.0.1/aapt.exe'),'dump','xmltree',str(apk),'AndroidManifest.xml'],text=True)
+tree=subprocess.check_output([str(SDK/'build-tools'/BUILD_TOOLS/'aapt.exe'),'dump','xmltree',str(apk),'AndroidManifest.xml'],text=True)
 activities=re.findall(r'(?ms)^([ ]+)E: activity\b(.*?)(?=^\1E: |\Z)',tree)
 main=next(block for _,block in activities if '=".MainActivity"' in block)
 setup=next(block for _,block in activities if '=".LauncherActivity"' in block)
@@ -59,8 +65,8 @@ assert 'org.timecrisis2.arcadevr.setup' in setup,'Setup needs a separate Android
 assert ('android.intent.category.LAUNCHER' in main)==bundled
 assert "native-code: 'arm64-v8a'" in badging
 assert 'quest2|quest3|quest3s' in tree,'Quest 2 must not fall back to an older-device compatibility profile'
-readelf=ROOT/'.tools/android-sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.exe'
+readelf=SDK/'ndk'/NDK_VERSION/'toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.exe'
 symbols=subprocess.check_output([str(readelf),'--dyn-syms',str(ROOT/'build/package-libs/libmain.so')],text=True)
 assert ' SDL_main' in symbols
 assert info['sha256']==hashlib.sha256(apk.read_bytes()).hexdigest()
-print(f'APK verified: bundled={bundled}, 22 chip hashes, both weapon assets, ARM64/DEX/SDL_main, {entry} launcher, actual game marked immersive, isolated setup task, licenses and hash')
+print(f'APK verified: bundled={bundled}, 22 chip hashes, all three weapon assets, ARM64/DEX/SDL_main, {entry} launcher, actual game marked immersive, isolated setup task, model attribution, licenses and hash')

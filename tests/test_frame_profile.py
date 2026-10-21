@@ -9,7 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 SDK = Path.home() / "Library" / "Android" / "sdk"
 NDK = SDK / "ndk" / "27.2.12479018"
-TOOLS = Path(os.environ.get("TCVR_SHARED_TOOLS", "/Users/mads/code/time-crisis-vr/.tools")).expanduser()
+TOOLS = Path(os.environ.get("TCVR_SHARED_TOOLS", ROOT / ".tools")).expanduser()
 SDL = TOOLS / "sdl" / "SDL2-2.30.11"
 OPENXR = TOOLS / "openxr" / "prefab" / "modules" / "headers" / "include"
 SYSROOT = NDK / "toolchains" / "llvm" / "prebuilt" / "darwin-x86_64" / "sysroot"
