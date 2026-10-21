@@ -4,6 +4,8 @@ Play the **arcade version of Time Crisis II** in VR on **Meta Quest 3**, the **V
 
 Built on the native System 23 reconstruction in **[spacestate1/namco22-decompile](https://github.com/spacestate1/namco22-decompile)**, with the OpenXR host and controller features adapted from [Time Crisis VR](https://github.com/DR-89/time-crisis-vr). This port uses the arcade US TSS3 Ver. B game, not the PlayStation 2 version.
 
+> **This fork** adds the standalone Steam Frame build, LAN multiplayer between headsets and move-to-hide physical cover to DR-89's port. They're proposed upstream in [DR-89/time-crisis-2-vr#7](https://github.com/DR-89/time-crisis-2-vr/pull/7). Until that's merged, build the Steam Frame and LAN versions from this repository.
+
 **[Download v0.3.3](https://github.com/DR-89/time-crisis-2-vr/releases/tag/v0.3.3)** | [Quickstart](docs/QUICKSTART.md) | [Steam Frame](docs/STEAM_FRAME_VR.md) | [LAN play](docs/LAN-PLAY.md) | [PCVR setup](docs/PCVR.md) | [Development](docs/DEVELOPMENT.md)
 
 ![Time Crisis II VR captured on Quest 3](docs/images/tc2-gameplay.jpg)
@@ -203,7 +205,7 @@ You need your own **Time Crisis II US TSS3 Ver. B** arcade ROM set, `timecrs2.zi
 Clone the repository with its `upstream` submodule:
 
 ```sh
-git clone --recurse-submodules https://github.com/DR-89/time-crisis-2-vr.git
+git clone --recurse-submodules https://github.com/astromaddie/time-crisis-2-vr.git
 cd time-crisis-2-vr
 ```
 
